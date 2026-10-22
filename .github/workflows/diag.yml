@@ -1,0 +1,41 @@
+name: diag
+on: { workflow_dispatch: {} }
+permissions: { contents: write }
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe NBA endpoints
+        run: |
+          mkdir -p data
+          UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          {
+            echo "== cdn schedule (full UA)"
+            curl -s -m 30 -o /dev/null -w "%{http_code}\n" -A "$UA" -H "Accept: */*" -H "Referer: https://www.nba.com/" -H "Origin: https://www.nba.com" "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"
+            echo "== cdn schedule (curl default UA)"
+            curl -s -m 30 -o /dev/null -w "%{http_code}\n" "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"
+            echo "== cdn liveData scoreboard"
+            curl -s -m 30 -o /dev/null -w "%{http_code}\n" -A "$UA" "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"
+            echo "== stats.nba.com scoreboardv3"
+            curl -s -m 40 -o /dev/null -w "%{http_code}\n" -A "$UA" -H "Accept: application/json" -H "Referer: https://www.nba.com/" -H "Origin: https://www.nba.com" "https://stats.nba.com/stats/scoreboardv3?GameDate=2026-10-20&LeagueID=00"
+            echo "== stats.nba.com boxscoreplayertrackv3 (nba_api)"
+            pip install -q nba_api >/dev/null 2>&1
+            python - <<'PY'
+          import json, sys
+          from nba_api.stats.endpoints import BoxScorePlayerTrackV3
+          try:
+              d = BoxScorePlayerTrackV3(game_id="0022600003", timeout=40).get_dict()
+              print("OK", str(d)[:200])
+          except Exception as e:
+              print("FAIL", e)
+          PY
+            echo "== espn"
+            curl -s -m 30 -o /dev/null -w "%{http_code}\n" "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20261020"
+          } 2>&1 | tee data/diag.log
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name spurs-bot; git config user.email spurs-bot@users.noreply.github.com
+          git add -A data; git commit -m "diag" || true; git pull --rebase -q; git push -q
